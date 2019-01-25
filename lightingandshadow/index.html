@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>Demo</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<style>
+			body {
+				color: #fff;
+				font-family: Monospace;
+				font-size: 13px;
+				text-align: center;
+				font-weight: bold;
+
+				background-color: #000;
+				margin: 0px;
+				overflow: hidden;
+			}
+
+			#info {
+				position: absolute;
+				padding: 10px;
+				width: 100%;
+				text-align: center;
+				color: #fff;
+			}
+
+			a { color: blue; }
+
+		</style>
+	</head>
+	<body>
+		<div id="info">
+
+		<script src="../js/three91.js"></script>
+
+		<script src="../js/controls/OrbitControls.js"></script>
+
+		<script src="../js/Detector.js"></script>
+
+		<script src='../js/libs/dat.gui.min.js'></script>
+
+		<script src='../js/geometries/TeapotBufferGeometry.js'></script>
+                
+                <script id="vertexShader" type="x-shader/x-vertex">
+ 
+	varying vec3 FragColor;
+	varying vec2 TexCoord;
+
+	uniform vec3 LightPosition; // light position, in camera coordinates
+	uniform vec3 La;		//Ambient light color
+	uniform vec3 Ld;		//Diffuse light color
+	uniform vec3 Ls;		//Specular light color
+ 
+	uniform vec3 Ka;			//Ambient reflectivity
+	uniform vec3 Kd;			//Diffuse reflectivity
+	uniform vec3 Ks;			//Specular reflectivity
+	uniform float Shininess;	//Specular shininess factor
+
+        uniform vec3 MaterialColor;
+	
+ 
+vec3 light(vec3 position, vec3 norm )
+{
+	vec3 s = normalize( vec3( LightPosition - position ) );
+	vec3 v = normalize( -position.xyz );
+	vec3 r = reflect( -s, norm );
+ 
+	vec3 ambient = MaterialColor * La * Ka;
+ 
+	float sDotN = max( dot( s, norm ), 0.0 );
+	vec3 diffuse = MaterialColor * Ld * Kd * sDotN;
+ 
+	vec3 spec = vec3( 0.0 );
+	if ( sDotN > 0.0 )
+		spec = MaterialColor * Ls * Ks * pow( max( dot(r,v) , 0.0 ), Shininess ) ;
+ 
+	return (ambient + diffuse + spec) * 5.0;
+}
+ 
+void main()
+{
+	mat4 MVP = projectionMatrix * modelViewMatrix;
+	vec3 eyeNorm;
+	vec3 eyePosition;
+	eyeNorm = normalize(normalMatrix * normal);
+	eyePosition = vec3(modelViewMatrix * vec4(position, 1));
+ 
+	FragColor = light(eyePosition, eyeNorm);
+ 
+	gl_Position = MVP * vec4( position, 1 );
+}
+                </script>
+<script id="fragShader" type="x-shader/x-fragment"> 
+	varying vec3 FragColor;
+ 
+	void main()
+	{
+		gl_FragColor = vec4(FragColor, 1);
+	}
+</script>
+
+		<script>
+
+
+			if ( ! Detector.webgl ) Detector.addGetWebGLMessage();
+
+			var camera, scene, renderer;
+			var cameraControls;
+			var effectController;
+			var teapotSize = 0.7;
+			var ambientLight, light;
+			var skybox;
+
+			var tess = -1;	// force initialization
+			var bBottom ;
+			var bLid;
+			var bBody;
+			var bFitLid;
+			var bNonBlinn;
+			var shading;
+			var wireMaterial, flatMaterial, phongMaterial, texturedMaterial, reflectiveMaterial, gouraudMaterial;
+
+
+			var teapot, textureCube;
+                        var cube, sphere, cone, cylinder;
+                        var sceneObjs = [teapot, cube, sphere, cone ,cylinder];
+
+			// allocate these just once
+			var diffuseColor = new THREE.Color();
+			var specularColor = new THREE.Color();
+
+			init();
+			render();
+
+			function init() {
+
+				var container = document.createElement( 'div' );
+				document.body.appendChild( container );
+
+				var canvasWidth = window.innerWidth;
+				var canvasHeight = window.innerHeight;
+
+				// CAMERA
+				camera = new THREE.PerspectiveCamera( 45, window.innerWidth / window.innerHeight, 1, 1000);
+				camera.position.set( 5, 5, 5);
+
+				// LIGHTS
+				ambientLight = new THREE.AmbientLight( 0x333333 );	// 0.2
+
+				light = new THREE.PointLight( 0xFFFFFF, 1.0, 0, 0 );
+				//light = new THREE.DirectionalLight( 0xFFFFFF, 1.0 );
+                                light.castShadow = true;
+                                light.shadowDarkness = 0.5;
+                                //light.shadowCameraVisible = true; // only for debugging
+                                // these six values define the boundaries of the yellow box seen above
+                                /*
+                                light.shadowCameraNear = 0.5;
+                                light.shadowCameraFar = 500;
+                                */
+                                /*
+                                light.shadowCameraLeft = -1.5;
+                                light.shadowCameraRight = 1.5;
+                                light.shadowCameraTop = 1.5;
+                                light.shadowCameraBottom = -1.5
+                                */
+                                light.shadow.bias = -0.001;
+                                //light.shadowCameraFov = 5;
+                                light.shadowCameraVisible = true;
+                                //light.shadow.camera = new THREE.OrthographicCamera( -100, 100, 100, -100, 0.5, 1000 );
+				// direction is set in GUI
+
+				// RENDERER
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.setSize( canvasWidth, canvasHeight );
+				renderer.gammaInput = true;
+				renderer.gammaOutput = true;
+                                renderer.shadowMapEnabled = true;
+                                renderer.shadowMapSoft = true;
+				container.appendChild( renderer.domElement );
+
+				// EVENTS
+				window.addEventListener( 'resize', onWindowResize, false );
+
+				// CONTROLS
+				cameraControls = new THREE.OrbitControls( camera, renderer.domElement );
+				cameraControls.addEventListener( 'change', render );
+
+				// TEXTURE MAP
+				var textureMap = new THREE.TextureLoader().load( 'textures/UV_Grid_Sm.jpg' );
+				textureMap.wrapS = textureMap.wrapT = THREE.RepeatWrapping;
+				textureMap.anisotropy = 16;
+
+				// REFLECTION MAP
+				var path = "textures/cube/skybox/";
+				var urls = [
+					path + "px.jpg", path + "nx.jpg",
+					path + "py.jpg", path + "ny.jpg",
+					path + "pz.jpg", path + "nz.jpg"
+				];
+
+				textureCube = new THREE.CubeTextureLoader().load( urls );
+
+				// MATERIALS
+				var materialColor = new THREE.Color();
+				materialColor.setRGB( 1.0, 1.0, 1.0 );
+
+				wireMaterial = new THREE.MeshBasicMaterial( { color: 0xFFFFFF, wireframe: true } ) ;
+
+				flatMaterial = new THREE.MeshPhongMaterial( { color: materialColor, specular: 0x000000, flatShading: true, side: THREE.DoubleSide } );
+
+                                //gouraudMaterial = new THREE.MeshLambertMaterial( { color: materialColor, flatShading: false, side: THREE.DoubleSide } );
+                            
+                                 gouraudMaterial = new THREE.ShaderMaterial( {
+				    defines : { USE_COLOR: true },
+                                    vertexShader: document.getElementById( 'vertexShader' ).textContent,
+                                    fragmentShader: document.getElementById( 'fragShader' ).textContent,
+				    side: THREE.DoubleSide,
+				    colors: THREE.VertexColors
+                                } );
+                                gouraudMaterial.color = new THREE.Color(0xFFFFFF);
+                                
+
+				phongMaterial = new THREE.MeshPhongMaterial( { color: materialColor, side: THREE.DoubleSide } );
+
+				texturedMaterial = new THREE.MeshPhongMaterial( { color: materialColor, map: textureMap, side: THREE.DoubleSide } );
+
+				reflectiveMaterial = new THREE.MeshPhongMaterial( { color: materialColor, envMap: textureCube, side: THREE.DoubleSide } );
+
+                                var planeGeo = new THREE.PlaneGeometry(9,9);
+                                var planeMesh = new THREE.Mesh(planeGeo, phongMaterial);
+                                planeMesh.geometry.rotateX(THREE.Math.degToRad(90));
+                                planeMesh.geometry.translate(0, -1, 0);
+                                planeMesh.receiveShadow = true;
+                                planeMesh.castShadow = false;
+
+
+				// scene itself
+				scene = new THREE.Scene();
+				scene.background = new THREE.Color( 0xAAAAAA );
+
+				scene.add( ambientLight );
+				scene.add( light );
+                                scene.add( planeMesh );
+                                var pointLightHelper = new THREE.PointLightHelper( light,  0.2);
+                                scene.add( pointLightHelper );
+
+				// GUI
+				setupGui();
+
+			}
+
+			// EVENT HANDLERS
+
+			function onWindowResize() {
+
+				var canvasWidth = window.innerWidth;
+				var canvasHeight = window.innerHeight;
+
+				renderer.setSize( canvasWidth, canvasHeight );
+
+				camera.aspect = canvasWidth / canvasHeight;
+				camera.updateProjectionMatrix();
+
+				render();
+
+			}
+
+			function setupGui() {
+
+				effectController = {
+
+					shininess: 40.0,
+					ka: 0.17,
+					kd: 0.51,
+					ks: 0.2,
+					metallic: true,
+
+					r:		0.725,
+					g: 0.725,
+					b:  0.5,
+
+					lhue:		 1.0,
+					lsat: 0.01,	// non-zero so that fractions will be shown
+					llightness:  1.0,
+
+					// bizarrely, if you initialize these with negative numbers, the sliders
+					// will not show any decimal places.
+					lx: 0.32,
+					ly: 3.01,
+					lz: 0.7,
+					newTess: 20,
+					newShading: "phong",
+                                        tx: 0,
+                                        ty: 0,
+                                        tz: 0
+				};
+
+				var h;
+
+				var gui = new dat.GUI();
+
+				// material (attributes)
+
+				h = gui.addFolder( "Material control" );
+
+				h.add( effectController, "shininess", 1.0, 400.0, 1.0 ).name( "shininess" ).onChange( render );
+				h.add( effectController, "kd", 0.0, 1.0, 0.025 ).name( "diffuse strength" ).onChange( render );
+				h.add( effectController, "ks", 0.0, 1.0, 0.025 ).name( "specular strength" ).onChange( render );
+				h.add( effectController, "ka", 0.0, 1.0, 0.025 ).name( "ambient stregth").onChange( render );
+				h.add( effectController, "metallic" ).onChange( render );
+
+				// material (color)
+
+				h = gui.addFolder( "Material color" );
+
+				h.add( effectController, "r", 0.0, 1.0, 0.025 ).name( "r" ).onChange( render );
+				h.add( effectController, "g", 0.0, 1.0, 0.025 ).name( "g" ).onChange( render );
+				h.add( effectController, "b", 0.0, 1.0, 0.025 ).name( "b" ).onChange( render );
+
+				// light (point)
+
+				h = gui.addFolder( "Lighting" );
+
+				h.add( effectController, "lhue", 0.0, 1.0, 0.025 ).name( "hue" ).onChange( render );
+				h.add( effectController, "lsat", 0.0, 1.0, 0.025 ).name( "saturation" ).onChange( render );
+				h.add( effectController, "llightness", 0.0, 1.0, 0.025 ).name( "lightness" ).onChange( render );
+
+				// light (directional)
+
+				h = gui.addFolder( "Light position" );
+
+				h.add( effectController, "lx", -4.0, 4.0, 0.025 ).name( "x" ).onChange( render );
+				h.add( effectController, "ly", -1.0, 4.0, 0.025 ).name( "y" ).onChange( render );
+				h.add( effectController, "lz", -4.0, 4.0, 0.025 ).name( "z" ).onChange( render );
+
+				h = gui.addFolder( "Tessellation control" );
+				h.add( effectController, "newTess", [ 2, 3, 4, 5, 6, 8, 10, 15, 20, 30, 40, 50 ] ).name( "Tessellation Level" ).onChange( render );
+
+				// shading
+				h = gui.add( effectController, "newShading", [ "wireframe", "flat", "gouraud", "phong", "textured", "reflective" ] ).name( "Shading" ).onChange( render );
+
+			}
+
+
+			//
+
+			function render() {
+
+				diffuseColor.setRGB( effectController.r, effectController.g, effectController.b);
+				if ( effectController.metallic )
+				{
+
+					// make colors match to give a more metallic look
+					specularColor.copy( diffuseColor );
+
+				}
+				else
+				{
+
+					// more of a plastic look
+					specularColor.setRGB( 1, 1, 1 );
+
+				}
+
+				diffuseColor.multiplyScalar( effectController.kd );
+				flatMaterial.color.copy( diffuseColor );
+				gouraudMaterial.color.copy( diffuseColor );
+				phongMaterial.color.copy( diffuseColor );
+				texturedMaterial.color.copy( diffuseColor );
+				specularColor.multiplyScalar( effectController.ks );
+				phongMaterial.specular.copy( specularColor );
+				texturedMaterial.specular.copy( specularColor );
+
+				phongMaterial.shininess = effectController.shininess;
+				texturedMaterial.shininess = effectController.shininess;
+
+				// Ambient's actually controlled by the light for this demo
+				ambientLight.color.setRGB( effectController.r, effectController.g, effectController.b);
+				//ambientLight.color.setHSL( effectController.r, effectController.g, effectController.b * effectController.ka);
+
+				light.position.set( effectController.lx, effectController.ly, effectController.lz );
+				//light.color.setRGB( effectController.lr, effectController.lg, effectController.lb);
+				light.color.setHSL( effectController.lhue, effectController.lsat, effectController.llightness);
+
+				if ( effectController.newTess !== tess ||
+					effectController.bottom !== bBottom ||
+					effectController.lid !== bLid ||
+					effectController.body !== bBody ||
+					effectController.fitLid !== bFitLid ||
+					effectController.nonblinn !== bNonBlinn ||
+					effectController.newShading !== shading ||
+					effectController.newShading === 'gouraud' )
+				{
+
+					tess = effectController.newTess;
+					shading = effectController.newShading;
+					createNewScene();
+				}
+
+				// skybox is rendered separately, so that it is always behind the teapot.
+				if ( shading === "reflective" ) {
+
+					scene.background = textureCube;
+
+				} else {
+
+					scene.background = null;
+
+				}
+
+				renderer.render( scene, camera );
+
+			}
+
+                        function createNewScene() {
+
+/* We need set uniforms for grounad materials here */
+/* 
+	uniform float lightIntensity;
+	uniform vec3 LightPosition; // light position, in camera coordinates
+
+	uniform vec3 Position;	//Light Position in eye-coords
+	uniform vec3 La;		//Ambient light intensity
+	uniform vec3 Ld;		//Diffuse light intensity
+	uniform vec3 Ls;		//Specular light intensity
+ 
+	uniform vec3 Ka;			//Ambient reflectivity
+	uniform vec3 Kd;			//Diffuse reflectivity
+	uniform vec3 Ks;			//Specular reflectivity
+	uniform float Shininess;	//Specular shininess factor
+*/
+			    var r,g,b,ar,ag,ab,lr,lg,lb;
+			    r = gouraudMaterial.color.r;
+			    g = gouraudMaterial.color.g;
+			    b = gouraudMaterial.color.b;
+			    ar = ambientLight.color.r;
+			    ab = ambientLight.color.b;
+			    ag = ambientLight.color.g;
+                            lr = light.color.r;
+                            lg = light.color.g;
+                            lb = light.color.b;
+			    var colourVec = new THREE.Vector3(r, g, b);
+	                    var ambientVec = new THREE.Vector3(ar, ag, ab);
+                            var lightColourVec = new THREE.Vector3(lr, lg, lb);
+			    gouraudMaterial.uniforms.LightPosition = { value: light.position} ;
+			    gouraudMaterial.uniforms.Shininess = { value: effectController.shininess };
+			    //gouraudMaterial.uniforms.La = { value: gouraudMaterial.color };
+			    gouraudMaterial.uniforms.MaterialColor = { value: colourVec };
+			    gouraudMaterial.uniforms.La = { value: ambientVec };
+			    gouraudMaterial.uniforms.Ld = { value:  lightColourVec };
+			    gouraudMaterial.uniforms.Ls = { value: new THREE.Vector3(specularColor.r, specularColor.g, specularColor.b) };
+			    gouraudMaterial.uniforms.Ka = { value: new THREE.Vector3(effectController.ka, effectController.ka, effectController.ka)};
+			    //gouraudMaterial.uniforms.Ka = { value: new THREE.Vector3(1,1,1)};
+			    gouraudMaterial.uniforms.Kd = { value: new THREE.Vector3(effectController.kd, effectController.kd, effectController.kd)};
+			    gouraudMaterial.uniforms.Ks = { value: new THREE.Vector3(effectController.ks, effectController.ks, effectController.ks)};
+
+                            var tess = effectController.newTess;
+
+                            for(var i = 0; i < sceneObjs.length; i++) {
+                                if(sceneObjs[i] !== undefined && sceneObjs[i] !== null) {
+                                    sceneObjs[i].geometry.dispose();
+                                    scene.remove(sceneObjs[i]);
+                                }
+                            }
+
+                            var cubeGeo = new THREE.BoxGeometry( 0.8 ,0.8 ,0.8, tess, tess, tess );
+                            cube = new THREE.Mesh(
+                                    cubeGeo,
+                                    shading === "wireframe" ? wireMaterial : (
+                                    shading === "flat" ? flatMaterial : (
+                                    shading === "gouraud" ? gouraudMaterial : (
+                                    shading === "phong" ? phongMaterial : (
+                                    shading === "textured" ? texturedMaterial : reflectiveMaterial ) ) ) ) );	// if no match, pick Phong
+
+                            cube.geometry.translate(2,0,2);
+                            cube.castShadow = true;
+                            cube.geometry.computeVertexNormals();
+
+                            scene.add( cube );
+
+                            var cylinderGeo = new THREE.CylinderBufferGeometry(0.3, 0.3, 0.6, tess);
+                            cylinder = new THREE.Mesh(
+                                    cylinderGeo,
+                                    shading === "wireframe" ? wireMaterial : (
+                                    shading === "flat" ? flatMaterial : (
+                                    shading === "gouraud" ? gouraudMaterial : (
+                                    shading === "phong" ? phongMaterial : (
+                                    shading === "textured" ? texturedMaterial : reflectiveMaterial ) ) ) ) );	// if no match, pick Phong
+
+                            cylinder.geometry.translate(-2, 0, -2);
+                            cylinder.castShadow = true;
+                            cylinder.geometry.computeVertexNormals();
+                            scene.add(cylinder)
+
+                            var sphereGeo = new THREE.SphereBufferGeometry(0.5, tess, tess);
+                            sphere = new THREE.Mesh(
+                                    sphereGeo,
+                                    shading === "wireframe" ? wireMaterial : (
+                                    shading === "flat" ? flatMaterial : (
+                                    shading === "gouraud" ? gouraudMaterial : (
+                                    shading === "phong" ? phongMaterial : (
+                                    shading === "textured" ? texturedMaterial : reflectiveMaterial ) ) ) ) );	// if no match, pick Phong
+
+                            sphere.geometry.translate(2, 0, -2);
+                            sphere.castShadow = true;
+                            sphere.geometry.computeVertexNormals();
+                            scene.add(sphere)
+
+                            var coneGeo = new THREE.ConeBufferGeometry(0.5, 2, tess);
+                            cone = new THREE.Mesh(
+                                    coneGeo,
+                                    shading === "wireframe" ? wireMaterial : (
+                                    shading === "flat" ? flatMaterial : (
+                                    shading === "gouraud" ? gouraudMaterial : (
+                                    shading === "phong" ? phongMaterial : (
+                                    shading === "textured" ? texturedMaterial : reflectiveMaterial ) ) ) ) );	// if no match, pick Phong
+
+                            cone.geometry.rotateX(THREE.Math.degToRad(90));
+                            cone.geometry.translate(-2, 0, 2);
+                            cone.castShadow = true;
+                            cone.geometry.computeVertexNormals();
+                            scene.add(cone)
+
+                            createNewTeapot();
+                            sceneObjs = [teapot, cube, sphere, cone ,cylinder];
+                        }
+
+			// Whenever the teapot changes, the scene is rebuilt from scratch (not much to it).
+			function createNewTeapot() {
+
+				var teapotGeometry = new THREE.TeapotBufferGeometry( teapotSize,
+					tess,
+					effectController.bottom,
+					effectController.lid,
+					effectController.body,
+					effectController.fitLid,
+					! effectController.nonblinn );
+
+				teapot = new THREE.Mesh(
+					teapotGeometry,
+					shading === "wireframe" ? wireMaterial : (
+					shading === "flat" ? flatMaterial : (
+					shading === "gouraud" ? gouraudMaterial : (
+					shading === "phong" ? phongMaterial : (
+					shading === "textured" ? texturedMaterial : reflectiveMaterial ) ) ) ) );	// if no match, pick Phong
+
+                                teapot.geometry.translate(effectController.tx, effectController.ty, effectController.tz);
+                                teapot.geometry.computeVertexNormals();
+                                teapot.castShadow = true;
+
+				scene.add( teapot );
+
+			}
+
+		</script>
+
+	</body>
+</html>
